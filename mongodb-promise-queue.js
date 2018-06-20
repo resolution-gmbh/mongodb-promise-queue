@@ -10,7 +10,7 @@
  **/
 
 
-let crypto = require('crypto')
+const crypto = require('crypto');
 
 
 // ========================================================================================
@@ -18,254 +18,236 @@ let crypto = require('crypto')
 
 // some helper functions
 function id() {
-    return crypto.randomBytes(16).toString('hex')
+    return crypto.randomBytes(16).toString('hex');
 }
 
 // ----------------------------------------------------------------------
 
 function now() {
-    return (new Date()).toISOString()
+    return (new Date()).toISOString();
 }
 
 // ----------------------------------------------------------------------
 
 function nowPlusSecs(secs) {
-    return (new Date(Date.now() + secs * 1000)).toISOString()
+    return (new Date(Date.now() + secs * 1000)).toISOString();
 }
-
-// ----------------------------------------------------------------------
-
-module.exports = function(mongoDbClient, name, opts = {}) {
-    return new Queue(mongoDbClient, name, opts)
-}
-
 
 // ========================================================================================
 
-
 // the Queue object itself
-function Queue(mongoDbClient, name, opts = {}) {
-    if ( !mongoDbClient ) {
-        throw new Error("mongodb-queue: provide a mongodb.MongoClient")
-    }
-    if ( !name ) {
-        throw new Error("mongodb-queue: provide a queue name")
-    }
-    opts = opts || {}
-
-    this.name = name
-    this.col = mongoDbClient.collection(name)
-    this.visibility = opts.visibility || 30
-    this.delay = opts.delay || 0
-
-    if ( opts.deadQueue ) {
-        this.deadQueue = opts.deadQueue
-        this.maxRetries = opts.maxRetries || 5
-    }
-}
-
-// ----------------------------------------------------------------------
-
-Queue.prototype.createIndexes = function() {
-    return this.col.createIndex({ deleted : 1, visible : 1 })
-    .then(indexname => {
-        return this.col.createIndex({ ack : 1 }, { unique : true, sparse : true })
-        .then(() => indexname)
-    })
-}
-
-// ----------------------------------------------------------------------
-
-Queue.prototype.add = function(payload, opts = {}) {
-    let delay = opts.delay || this.delay
-    let visible = delay ? nowPlusSecs(delay) : now()
-
-    let messages = []
-
-    if (payload instanceof Array) {
-        if (payload.length === 0) {
-            let errMsg = 'Queue.add(): Array payload length must be greater than 0'
-            // return callback(new Error(errMsg))
-            throw new Error(errMsg)
+class MongoDbQueue {
+    constructor(mongoDbClient, name, opts = {}) {
+        if (!mongoDbClient) {
+            throw new Error('mongodb-queue: provide a mongodb.MongoClient');
         }
+        if (!name) {
+            throw new Error('mongodb-queue: provide a queue name');
+        }
+        opts = opts || {};
 
-        payload.forEach(function(payload) {
-            messages.push({
-                visible  : visible,
-                payload  : payload,
-            })
-        })
-    } else {
-        messages.push({
-            visible  : visible,
-            payload  : payload,
-        })
-    }
+        this.name = name;
+        this.col = mongoDbClient.collection(name);
+        this.visibility = opts.visibility || 30;
+        this.delay = opts.delay || 0;
 
-    return this.col.insertMany(messages)
-    .then(results => {
-        return payload instanceof Array ?
-            results.insertedIds :
-            results.ops[0]._id
-    })
-}
-
-// ----------------------------------------------------------------------
-
-Queue.prototype.get = function(opts = {}) {
-    let visibility = opts.visibility || this.visibility
-
-    let query = {
-        deleted : null,
-        visible : { $lte : now() },
-    }
-
-    let sort = {
-        _id : 1
-    }
-    
-    let update = {
-        $inc : { tries : 1 },
-        $set : {
-            ack     : id(),
-            visible : nowPlusSecs(visibility),
+        if (opts.deadQueue) {
+            this.deadQueue = opts.deadQueue;
+            this.maxRetries = opts.maxRetries || 5;
         }
     }
 
-    return this.col.findOneAndUpdate(query, update, { sort: sort, returnOriginal : false })
-    .then((result) => {
-        let msg = result.value
+    // ----------------------------------------------------------------------
+
+    async createIndexes() {
+        return [
+            await this.col.createIndex({deleted: 1, visible: 1}),
+            await this.col.createIndex({ack: 1}, {unique: true, sparse: true}),
+        ];
+    }
+
+    // ----------------------------------------------------------------------
+
+    async add(payload, opts = {}) {
+        const delay = opts.delay || this.delay;
+        const visible = delay ? nowPlusSecs(delay) : now();
+
+        if (payload instanceof Array) {
+            // Insert many
+            if (payload.length === 0) {
+                const errMsg = 'Queue.add(): Array payload length must be greater than 0';
+                throw new Error(errMsg);
+            }
+            const messages = payload.map((payload) => {
+                return {
+                    visible: visible,
+                    payload: payload,
+                };
+            });
+            const result = await this.col.insertMany(messages);
+
+            return result.insertedIds;
+        } else {
+            // insert one
+            const result = await this.col.insertOne({
+                visible: visible,
+                payload: payload,
+            });
+            return result.insertedId;
+        }
+    }
+
+    // ----------------------------------------------------------------------
+
+    async get(opts = {}) {
+        const visibility = opts.visibility || this.visibility;
+
+        const query = {
+            deleted: null,
+            visible: {$lte: now()},
+        };
+
+        const sort = {
+            _id: 1
+        };
+
+        const update = {
+            $inc: {tries: 1},
+            $set: {
+                ack: id(),
+                visible: nowPlusSecs(visibility),
+            }
+        };
+
+        const result = await this.col.findOneAndUpdate(query, update, {sort: sort, returnOriginal: false});
+        let msg = result.value;
 
         if (!msg) return;
 
         // convert to an external representation
         msg = {
             // convert '_id' to an 'id' string
-            id      : '' + msg._id,
-            ack     : msg.ack,
-            payload : msg.payload,
-            tries   : msg.tries,
-        }
+            id: `${msg._id}`,
+            ack: msg.ack,
+            payload: msg.payload,
+            tries: msg.tries,
+        };
 
         // if we have a deadQueue, then check the tries, else don't
-        if ( this.deadQueue ) {
+        if (this.deadQueue) {
             // check the tries
-            if ( msg.tries > this.maxRetries ) {
+            if (msg.tries > this.maxRetries) {
                 // So:
                 // 1) add this message to the deadQueue
                 // 2) ack this message from the regular queue
                 // 3) call ourself to return a new message (if exists)
-                return this.deadQueue.add(msg)
-                .then(() => {
-                    this.ack(msg.ack)
-                })
-                .then(() => {
-                    this.get(opts)
-                })
+                await this.deadQueue.add(msg);
+                await this.ack(msg.ack);
+                return await this.get(opts);
             }
         }
 
-        return msg
-    })
-}
-
-// ----------------------------------------------------------------------
-
-Queue.prototype.ping = function(ack, opts = {}) {
-    let visibility = opts.visibility || this.visibility
-    
-    let query = {
-        ack     : ack,
-        visible : { $gt : now() },
-        deleted : null,
-    }
-    
-    let update = {
-        $set : {
-            visible : nowPlusSecs(visibility)
-        }
+        return msg;
     }
 
-    return this.col.findOneAndUpdate(query, update, { returnOriginal : false })
-    .then(msg => {
-        if ( !msg.value ) {
-            throw new Error("Queue.ping(): Unidentified ack  : " + ack)
+    // ----------------------------------------------------------------------
+
+    async ping(ack, opts = {}) {
+        const visibility = opts.visibility || this.visibility;
+
+        const query = {
+            ack: ack,
+            visible: {$gt: now()},
+            deleted: null,
+        };
+
+        const update = {
+            $set: {
+                visible: nowPlusSecs(visibility)
+            }
+        };
+
+        const msg = await this.col.findOneAndUpdate(query, update, {returnOriginal: false});
+        if (!msg.value) {
+            throw new Error('Queue.ping(): Unidentified ack  : ' + ack);
         }
 
-        return '' + msg.value._id
-    })
-}
-
-// ----------------------------------------------------------------------
-
-Queue.prototype.ack = function(ack) {
-    let query = {
-        ack     : ack,
-        visible : { $gt : now() },
-        deleted : null,
+        return `${msg.value._id}`;
     }
 
-    let update = {
-        $set : {
-            deleted : now(),
-        }
-    }
+    // ----------------------------------------------------------------------
 
-    return this.col.findOneAndUpdate(query, update, { returnOriginal : false })
-    .then(msg => {
-        if ( !msg.value ) {
-            throw new Error("Queue.ack(): Unidentified ack : " + ack)
+    async ack(ack) {
+        const query = {
+            ack: ack,
+            visible: {$gt: now()},
+            deleted: null,
+        };
+
+        const update = {
+            $set: {
+                deleted: now(),
+            }
+        };
+
+        const msg = await this.col.findOneAndUpdate(query, update, {returnOriginal: false});
+        if (!msg.value) {
+            throw new Error('Queue.ack(): Unidentified ack : ' + ack);
         }
 
-        return '' + msg.value._id
-    })
-}
-
-// ----------------------------------------------------------------------
-
-Queue.prototype.clean = function() {
-    let query = {
-        deleted : { $exists : true },
+        return `${msg.value._id}`;
     }
 
-    return this.col.deleteMany(query)
-}
+    // ----------------------------------------------------------------------
 
-// ----------------------------------------------------------------------
+    async clean() {
+        const query = {
+            deleted: {$exists: true},
+        };
 
-Queue.prototype.total = function() {
-    return this.col.count()
-}
-
-// ----------------------------------------------------------------------
-
-Queue.prototype.size = function() {
-    let query = {
-        deleted : null,
-        visible : { $lte : now() },
+        return await this.col.deleteMany(query);
     }
 
-    return this.col.count(query)
+    // ----------------------------------------------------------------------
+
+    async total() {
+        return await this.col.count();
+    }
+
+    // ----------------------------------------------------------------------
+
+    async size() {
+        const query = {
+            deleted: null,
+            visible: {$lte: now()},
+        };
+
+        return await this.col.count(query);
+    }
+
+    // ----------------------------------------------------------------------
+
+    async inFlight() {
+        const query = {
+            ack: {$exists: true},
+            visible: {$gt: now()},
+            deleted: null,
+        };
+
+        return await this.col.count(query);
+    }
+
+    // ----------------------------------------------------------------------
+
+    async done() {
+        const query = {
+            deleted: {$exists: true},
+        };
+
+        return await this.col.count(query);
+    }
 }
 
 // ----------------------------------------------------------------------
 
-Queue.prototype.inFlight = function() {
-    let query = {
-        ack     : { $exists : true },
-        visible : { $gt : now() },
-        deleted : null,
-    }
-
-    return this.col.count(query)
-}
-
-// ----------------------------------------------------------------------
-
-Queue.prototype.done = function() {
-    let query = {
-        deleted : { $exists : true },
-    }
-
-    return this.col.count(query)
-}
+module.exports = MongoDbQueue;

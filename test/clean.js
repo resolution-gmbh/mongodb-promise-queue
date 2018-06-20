@@ -1,172 +1,51 @@
-var async = require('async')
-var test = require('tape')
+const setup = require('./setup.js');
+const MongoDbQueue = require('../');
+const {assert} = require('chai');
 
-var setup = require('./setup.js')
-var mongoDbQueue = require('../')
+describe('', function () {
+    let client, db, queue;
 
-setup(function(db) {
+    before(async function () {
+        ({client, db} = await setup());
+        queue = new MongoDbQueue(db, 'clean', {visibility: 3}); // TODO
+    });
 
-    test('clean: check deleted messages are deleted', function(t) {
-        var queue = mongoDbQueue(db, 'clean', { visibility : 3 })
-        var msg
+    it('checks clean does not change an empty queue', async function () {
+        assert.equal(await queue.size(), 0);
+        assert.equal(await queue.total(), 0);
+        await queue.clean();
+        assert.equal(await queue.size(), 0);
+        assert.equal(await queue.total(), 0);
+    });
 
-        async.series(
-            [
-                function(next) {
-                    queue.size(function(err, size) {
-                        t.ok(!err, 'There is no error.')
-                        t.equal(size, 0, 'There is currently nothing on the queue')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.total(function(err, size) {
-                        t.ok(!err, 'There is no error.')
-                        t.equal(size, 0, 'There is currently nothing in the queue at all')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.clean(function(err) {
-                        t.ok(!err, 'There is no error.')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.size(function(err, size) {
-                        t.ok(!err, 'There is no error.')
-                        t.equal(size, 0, 'There is currently nothing on the queue')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.total(function(err, size) {
-                        t.ok(!err, 'There is no error.')
-                        t.equal(size, 0, 'There is currently nothing in the queue at all')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.add('Hello, World!', function(err) {
-                        t.ok(!err, 'There is no error when adding a message.')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.clean(function(err) {
-                        t.ok(!err, 'There is no error.')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.size(function(err, size) {
-                        t.ok(!err, 'There is no error.')
-                        t.equal(size, 1, 'Queue size is correct')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.total(function(err, size) {
-                        t.ok(!err, 'There is no error.')
-                        t.equal(size, 1, 'Queue total is correct')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.get(function(err, newMsg) {
-                        msg = newMsg
-                        t.ok(msg.id, 'Got a msg.id (sanity check)')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.size(function(err, size) {
-                        t.ok(!err, 'There is no error.')
-                        t.equal(size, 0, 'Queue size is correct')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.total(function(err, size) {
-                        t.ok(!err, 'There is no error.')
-                        t.equal(size, 1, 'Queue total is correct')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.clean(function(err) {
-                        t.ok(!err, 'There is no error.')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.size(function(err, size) {
-                        t.ok(!err, 'There is no error.')
-                        t.equal(size, 0, 'Queue size is correct')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.total(function(err, size) {
-                        t.ok(!err, 'There is no error.')
-                        t.equal(size, 1, 'Queue total is correct')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.ack(msg.ack, function(err, id) {
-                        t.ok(!err, 'No error when acking the message')
-                        t.ok(id, 'Received an id when acking this message')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.size(function(err, size) {
-                        t.ok(!err, 'There is no error.')
-                        t.equal(size, 0, 'Queue size is correct')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.total(function(err, size) {
-                        t.ok(!err, 'There is no error.')
-                        t.equal(size, 1, 'Queue total is correct')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.clean(function(err) {
-                        t.ok(!err, 'There is no error.')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.size(function(err, size) {
-                        t.ok(!err, 'There is no error.')
-                        t.equal(size, 0, 'Queue size is correct')
-                        next()
-                    })
-                },
-                function(next) {
-                  queue.total(function(err, size) {
-                    t.ok(!err, 'There is no error.')
-                    t.equal(size, 0, 'Queue total is correct')
-                    next()
-                  })
-                },
-            ],
-            function(err) {
-                if (err) t.fail(err)
-                t.pass('Finished test ok')
-                t.end()
-            }
-        )
-    })
+    it('check only ACKed messages are deleted', async function () {
+        assert.isOk(await queue.add('Hello, World!'));
+        await queue.clean();
+        assert.equal(await queue.size(), 1);
+        assert.equal(await queue.total(), 1);
 
-    test('db.close()', function(t) {
-        t.pass('db.close()')
-        db.close()
-        t.end()
-    })
+        const msg = await queue.get();
+        assert.isOk(msg.id);
+        assert.equal(msg.payload, 'Hello, World!');
+        assert.equal(await queue.size(), 0);
+        assert.equal(await queue.total(), 1);
 
-})
+        await queue.clean();
+        assert.equal(await queue.size(), 0);
+        assert.equal(await queue.total(), 1);
+
+        assert.isOk(await queue.ack(msg.ack));
+        assert.equal(await queue.size(), 0);
+        assert.equal(await queue.total(), 1);
+
+        await queue.clean();
+        assert.equal(await queue.size(), 0);
+        assert.equal(await queue.total(), 0);
+    });
+
+
+    after(async function () {
+        await client.close();
+    });
+
+});
