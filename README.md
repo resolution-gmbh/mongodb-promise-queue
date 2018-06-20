@@ -12,12 +12,13 @@ Based of the code of [mongodb-queue](https://github.com/chilts/mongodb-queue), a
 Create a connection to your MongoDB database, and use it to create a queue object:
 
 ```js
-let mongodb = require('mongodb')
-let mongoDbQueue = require('mongodb-promise-queue')
+const mongodb = require('mongodb')
+const mongoDbQueue = require('mongodb-promise-queue')
 
-let con = 'mongodb://localhost:27017/test'
+const con = 'mongodb://localhost:27017/test'
 
-mongodb.MongoClient.connect(con, function(err, db) {
+mongodb.MongoClient.connect(con, function(err, client) {
+    const db = client.db(null)
     let queue = mongoDbQueue(db, 'my-queue')
 })
 ```

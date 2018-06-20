@@ -1,27 +1,25 @@
-var async = require('async')
-var test = require('tape')
+const setup = require('./setup.js');
+const MongoDbQueue = require('../');
+const {assert} = require('chai');
 
-var setup = require('./setup.js')
-var mongoDbQueue = require('../')
+describe('indexes', function () {
+    let client, db, queue;
 
-setup(function(db) {
+    before(async function () {
+        ({client, db} = await setup());
+        queue = new MongoDbQueue(db, 'indexes');
+    });
 
-    test('visibility: check message is back in queue after 3s', function(t) {
-        t.plan(2)
+    it('checks if indexes are created without error', async function () {
+        const indexNames = await queue.createIndexes();
+        assert.isArray(indexNames);
+        assert.equal(indexNames.length, 2);
+        assert.isString(indexNames[0]);
+        assert.isString(indexNames[1]);
+    });
 
-        var queue = mongoDbQueue(db, 'visibility', { visibility : 3 })
+    after(async function () {
+        await client.close();
+    });
 
-        queue.createIndexes(function(err, indexName) {
-            t.ok(!err, 'There was no error when running .ensureIndexes()')
-            t.ok(indexName, 'receive indexName we created')
-            t.end()
-        })
-    })
-
-    test('db.close()', function(t) {
-        t.pass('db.close()')
-        db.close()
-        t.end()
-    })
-
-})
+});

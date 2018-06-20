@@ -4,6 +4,7 @@
  *
  * Copyright (c) 2014 Andrew Chilton
  * Copyright (c) 2018 Frédéric Mascaro
+ * Copyright (c) 2018 Tobias Theobald, resolution Reichert Network Solutions GmbH
  *
  * License: MIT
  *
@@ -24,30 +25,29 @@ function id() {
 // ----------------------------------------------------------------------
 
 function now() {
-    return (new Date()).toISOString();
+    return new Date();
 }
 
 // ----------------------------------------------------------------------
 
 function nowPlusSecs(secs) {
-    return (new Date(Date.now() + secs * 1000)).toISOString();
+    return new Date(Date.now() + secs * 1000);
 }
 
 // ========================================================================================
 
 // the Queue object itself
 class MongoDbQueue {
-    constructor(mongoDbClient, name, opts = {}) {
-        if (!mongoDbClient) {
-            throw new Error('mongodb-queue: provide a mongodb.MongoClient');
+    constructor(mongoDb, name, opts = {}) {
+        if (!mongoDb) {
+            throw new Error('mongodb-queue: provide a mongodb.MongoClient.db');
         }
         if (!name) {
             throw new Error('mongodb-queue: provide a queue name');
         }
-        opts = opts || {};
 
         this.name = name;
-        this.col = mongoDbClient.collection(name);
+        this.col = mongoDb.collection(name);
         this.visibility = opts.visibility || 30;
         this.delay = opts.delay || 0;
 
@@ -86,7 +86,14 @@ class MongoDbQueue {
             });
             const result = await this.col.insertMany(messages);
 
-            return result.insertedIds;
+            // These need to be converted because they're in a weird format.
+            const insertedIds = [];
+            for (const key of Object.keys(result.insertedIds)) {
+                const numericKey = +key;
+                insertedIds[numericKey] = `${result.insertedIds[key]}`;
+            }
+
+            return insertedIds;
         } else {
             // insert one
             const result = await this.col.insertOne({

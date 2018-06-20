@@ -1,174 +1,89 @@
-var async = require('async')
-var test = require('tape')
+const setup = require('./setup.js');
+const MongoDbQueue = require('../');
+const {assert} = require('chai');
+const delay = require('timeout-as-promise');
 
-var setup = require('./setup.js')
-var mongoDbQueue = require('../')
+describe('visibility', function () {
+    let client, db, queue;
 
-setup(function(db) {
+    before(async function () {
+        ({client, db} = await setup());
+        queue = new MongoDbQueue(db, 'visibility', {visibility: 1});
+    });
 
-    test('visibility: check message is back in queue after 3s', function(t) {
-        var queue = mongoDbQueue(db, 'visibility', { visibility : 3 })
+    it('checks is message is back in queue after visibility runs out', async function () {
+        assert.isOk(await queue.add('Hello, World!'));
+        assert.isOk(await queue.get());
 
-        async.series(
-            [
-                function(next) {
-                    queue.add('Hello, World!', function(err) {
-                        t.ok(!err, 'There is no error when adding a message.')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.get(function(err, msg) {
-                        // wait over 3s so the msg returns to the queue
-                        t.ok(msg.id, 'Got a msg.id (sanity check)')
-                        setTimeout(next, 4 * 1000)
-                    })
-                },
-                function(next) {
-                    queue.get(function(err, msg) {
-                        // yes, there should be a message on the queue again
-                        t.ok(msg.id, 'Got a msg.id (sanity check)')
-                        queue.ack(msg.ack, function(err) {
-                            t.ok(!err, 'No error when acking the message')
-                            next()
-                        })
-                    })
-                },
-                function(next) {
-                    queue.get(function(err, msg) {
-                        // no more messages
-                        t.ok(!err, 'No error when getting no messages')
-                        t.ok(!msg, 'No msg received')
-                        next()
-                    })
-                },
-            ],
-            function(err) {
-                if (err) t.fail(err)
-                t.pass('Finished test ok')
-                t.end()
+        // wait a bit so the message goes back into the queue
+        await delay(1500);
+
+        // Fetch it again
+        const msg = await queue.get();
+        assert.isOk(msg.id);
+
+        // ACK it
+        await queue.ack(msg.ack);
+
+        assert.isNotOk(await queue.get());
+    });
+
+    it('checks that a late ack doesn\'t remove the msg', async function () {
+        assert.isOk(await queue.add('Hello, World!'));
+        let msg = await queue.get();
+        const oldAck = msg.ack;
+        assert.isOk(msg.ack);
+
+        // let it time out
+        await delay(1500);
+        try {
+            await queue.ack(oldAck);
+            assert.fail('Successfully acked timed out message');
+        } catch (e) {
+            if (e.message === 'assert.fail()') {
+                throw e;
             }
-        )
-    })
+            // else ok
+        }
 
-    test("visibility: check that a late ack doesn't remove the msg", function(t) {
-        var queue = mongoDbQueue(db, 'visibility', { visibility : 3 })
-        var originalAck
+        // fetch again, ack should now be different
+        msg = await queue.get();
+        assert.notEqual(msg.ack, oldAck);
 
-        async.series(
-            [
-                function(next) {
-                    queue.add('Hello, World!', function(err) {
-                        t.ok(!err, 'There is no error when adding a message.')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.get(function(err, msg) {
-                        t.ok(msg.id, 'Got a msg.id (sanity check)')
+        // and finalize
+        await queue.ack(msg.ack);
+        assert.isNotOk(await queue.get());
+    });
 
-                        // remember this original ack
-                        originalAck = msg.ack
+    it('checks if message visibility overrides queue visibility', async function () {
+        this.timeout(5000);
+        assert.isOk(await queue.add('Hello, World!'));
+        let msg = await queue.get({visibility: 3});
+        assert.isOk(msg.id);
 
-                        // wait over 3s so the msg returns to the queue
-                        setTimeout(function() {
-                            t.pass('Back from timeout, now acking the message')
+        // Wait for the regular visibility to run out
+        await delay(2000);
 
-                            // now ack the message but too late - it shouldn't be deleted
-                            queue.ack(msg.ack, function(err, msg) {
-                                t.ok(err, 'Got an error when acking the message late')
-                                t.ok(!msg, 'No message was updated')
-                                next()
-                            })
-                        }, 4 * 1000)
-                    })
-                },
-                function(next) {
-                    queue.get(function(err, msg) {
-                        // the message should now be able to be retrieved, with a new 'ack' id
-                        t.ok(msg.id, 'Got a msg.id (sanity check)')
-                        t.notEqual(msg.ack, originalAck, 'Original ack and new ack are different')
+        // This should not return anything
+        msg = await queue.get();
+        assert.isNotOk(msg);
 
-                        // now ack this new retrieval
-                        queue.ack(msg.ack, next)
-                    })
-                },
-                function(next) {
-                    queue.get(function(err, msg) {
-                        // no more messages
-                        t.ok(!err, 'No error when getting no messages')
-                        t.ok(!msg, 'No msg received')
-                        next()
-                    })
-                },
-            ],
-            function(err) {
-                if (err) t.fail(err)
-                t.pass('Finished test ok')
-                t.end()
-            }
-        )
-    })
+        // wait a bit so the message goes back into the queue
+        await delay(2000);
 
-    test("visibility: check visibility option overrides the queue visibility", function(t) {
-        var queue = mongoDbQueue(db, 'visibility', { visibility : 2 })
-        var originalAck
+        // Now it should be there again
+        msg = await queue.get();
+        assert.isOk(msg.id);
 
-        async.series(
-            [
-                function(next) {
-                    queue.add('Hello, World!', function(err) {
-                        t.ok(!err, 'There is no error when adding a message.')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.get({ visibility: 4 }, function(err, msg) {
-                        // wait over 2s so the msg would normally have returns to the queue
-                        t.ok(msg.id, 'Got a msg.id (sanity check)')
-                        setTimeout(next, 3 * 1000)
-                    })
-                },
-                function(next) {
-                    queue.get(function(err, msg) {
-                        // messages should not be back yet
-                        t.ok(!err, 'No error when getting no messages')
-                        t.ok(!msg, 'No msg received')
-                        // wait 2s so the msg should have returns to the queue
-                        setTimeout(next, 2 * 1000)
-                    })
-                },
-                function(next) {
-                    queue.get(function(err, msg) {
-                        // yes, there should be a message on the queue again
-                        t.ok(msg.id, 'Got a msg.id (sanity check)')
-                        queue.ack(msg.ack, function(err) {
-                            t.ok(!err, 'No error when acking the message')
-                            next()
-                        })
-                    })
-                },
-                function(next) {
-                    queue.get(function(err, msg) {
-                        // no more messages
-                        t.ok(!err, 'No error when getting no messages')
-                        t.ok(!msg, 'No msg received')
-                        next()
-                    })
-                }
-            ],
-            function(err) {
-                if (err) t.fail(err)
-                t.pass('Finished test ok')
-                t.end()
-            }
-        )
-    })
+        // ACK it
+        await queue.ack(msg.ack);
 
-    test('db.close()', function(t) {
-        t.pass('db.close()')
-        db.close()
-        t.end()
-    })
+        assert.isNotOk(await queue.get());
+    });
 
-})
+
+    after(async function () {
+        await client.close();
+    });
+
+});

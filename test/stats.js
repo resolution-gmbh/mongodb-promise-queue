@@ -1,208 +1,128 @@
-var async = require('async')
-var test = require('tape')
+const setup = require('./setup.js');
+const MongoDbQueue = require('../');
+const {assert} = require('chai');
+const delay = require('timeout-as-promise');
 
-var setup = require('./setup.js')
-var mongoDbQueue = require('../')
+describe('stats', function () {
+    let client, db;
 
-setup(function(db) {
-
-    test('first test', function(t) {
-        var queue = mongoDbQueue(db, 'stats')
-        t.ok(queue, 'Queue created ok')
-        t.end()
+    before(async function () {
+        ({client, db} = await setup());
     });
 
-    test('stats for a single message added, received and acked', function(t) {
-        var queue = mongoDbQueue(db, 'stats1')
-        var msg
+    it('checks stats for a single message added, received and acked are correct', async function () {
+        const queue = new MongoDbQueue(db, 'stats');
 
-        async.series(
-            [
-                function(next) {
-                    queue.add('Hello, World!', function(err, id) {
-                        t.ok(!err, 'There is no error when adding a message.')
-                        t.ok(id, 'Received an id for this message')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.total(function(err, count) {
-                        t.equal(count, 1, 'Total number of messages is one')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.size(function(err, count) {
-                        t.equal(count, 1, 'Size of queue is one')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.inFlight(function(err, count) {
-                        t.equal(count, 0, 'There are no inFlight messages')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.done(function(err, count) {
-                        t.equal(count, 0, 'There are no done messages')
-                        next()
-                    })
-                },
-                function(next) {
-                    // let's set one to be inFlight
-                    queue.get(function(err, newMsg) {
-                        msg = newMsg
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.total(function(err, count) {
-                        t.equal(count, 1, 'Total number of messages is still one')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.size(function(err, count) {
-                        t.equal(count, 0, 'Size of queue is now zero (ie. none to come)')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.inFlight(function(err, count) {
-                        t.equal(count, 1, 'There is one inflight message')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.done(function(err, count) {
-                        t.equal(count, 0, 'There are still no done messages')
-                        next()
-                    })
-                },
-                function(next) {
-                    // now ack that message
-                    queue.ack(msg.ack, function(err, newMsg) {
-                        msg = newMsg
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.total(function(err, count) {
-                        t.equal(count, 1, 'Total number of messages is again one')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.size(function(err, count) {
-                        t.equal(count, 0, 'Size of queue is still zero (ie. none to come)')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.inFlight(function(err, count) {
-                        t.equal(count, 0, 'There are no inflight messages anymore')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.done(function(err, count) {
-                        t.equal(count, 1, 'There is now one processed message')
-                        next()
-                    })
-                },
-            ],
-            function(err) {
-                t.ok(!err, 'No error when doing stats on one message')
-                t.end()
-            }
-        )
-    })
+        // Initial state
+        assert.equal(await queue.total(), 0);
+        assert.equal(await queue.size(), 0);
+        assert.equal(await queue.inFlight(), 0);
+        assert.equal(await queue.done(), 0);
 
+        // Adds a message
+        assert.isOk(await queue.add('Hello, World!'));
+        assert.equal(await queue.total(), 1);
+        assert.equal(await queue.size(), 1);
+        assert.equal(await queue.inFlight(), 0);
+        assert.equal(await queue.done(), 0);
 
-    // ToDo: add more tests for adding a message, getting it and letting it lapse
-    // then re-checking all stats.
+        // Fetch it so it's now in flight
+        const msg = await queue.get();
+        assert.isOk(msg.id);
+        assert.equal(await queue.total(), 1);
+        assert.equal(await queue.size(), 0);
+        assert.equal(await queue.inFlight(), 1);
+        assert.equal(await queue.done(), 0);
 
-    test('stats for a single message added, received, timed-out and back on queue', function(t) {
-        var queue = mongoDbQueue(db, 'stats2', { visibility : 3 })
+        // Ack it so it's done
+        assert.isOk(await queue.ack(msg.ack));
+        assert.equal(await queue.total(), 1);
+        assert.equal(await queue.size(), 0);
+        assert.equal(await queue.inFlight(), 0);
+        assert.equal(await queue.done(), 1);
 
-        async.series(
-            [
-                function(next) {
-                    queue.add('Hello, World!', function(err, id) {
-                        t.ok(!err, 'There is no error when adding a message.')
-                        t.ok(id, 'Received an id for this message')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.total(function(err, count) {
-                        t.equal(count, 1, 'Total number of messages is one')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.size(function(err, count) {
-                        t.equal(count, 1, 'Size of queue is one')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.inFlight(function(err, count) {
-                        t.equal(count, 0, 'There are no inFlight messages')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.done(function(err, count) {
-                        t.equal(count, 0, 'There are no done messages')
-                        next()
-                    })
-                },
-                function(next) {
-                    // let's set one to be inFlight
-                    queue.get(function(err, msg) {
-                        // msg is ignored, we don't care about the message here
-                        setTimeout(next, 4 * 1000)
-                    })
-                },
-                function(next) {
-                    queue.total(function(err, count) {
-                        t.equal(count, 1, 'Total number of messages is still one')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.size(function(err, count) {
-                        t.equal(count, 1, 'Size of queue is still at one')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.inFlight(function(err, count) {
-                        t.equal(count, 0, 'There are no inflight messages again')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.done(function(err, count) {
-                        t.equal(count, 0, 'There are still no done messages')
-                        next()
-                    })
-                },
-            ],
-            function(err) {
-                t.ok(!err, 'No error when doing stats on one message')
-                t.end()
-            }
-        )
-    })
+        // And clear it so it's not even done any more
+        await queue.clean();
+        assert.equal(await queue.total(), 0);
+        assert.equal(await queue.size(), 0);
+        assert.equal(await queue.inFlight(), 0);
+        assert.equal(await queue.done(), 0);
+    });
 
-    test('db.close()', function(t) {
-        t.pass('db.close()')
-        db.close()
-        t.end()
-    })
+    it('checks stats for a single message added, received, timed out, received, pinged and acked are correct', async function () {
+        this.timeout(6000);
+        const queue = new MongoDbQueue(db, 'stats', {visibility: 2});
+        let msg;
 
-})
+        // Initial state
+        assert.equal(await queue.total(), 0);
+        assert.equal(await queue.size(), 0);
+        assert.equal(await queue.inFlight(), 0);
+        assert.equal(await queue.done(), 0);
+
+        // Adds a message
+        assert.isOk(await queue.add('Hello, World!'));
+        assert.equal(await queue.total(), 1);
+        assert.equal(await queue.size(), 1);
+        assert.equal(await queue.inFlight(), 0);
+        assert.equal(await queue.done(), 0);
+
+        // Fetch it so it's now in flight
+        msg = await queue.get();
+        assert.isOk(msg.id);
+        assert.equal(await queue.total(), 1);
+        assert.equal(await queue.size(), 0);
+        assert.equal(await queue.inFlight(), 1);
+        assert.equal(await queue.done(), 0);
+
+        // Let it time out
+        await delay(2500);
+        assert.equal(await queue.total(), 1);
+        assert.equal(await queue.size(), 1);
+        assert.equal(await queue.inFlight(), 0);
+        assert.equal(await queue.done(), 0);
+
+        // Fetch it again
+        msg = await queue.get();
+        assert.isOk(msg.id);
+        assert.equal(await queue.total(), 1);
+        assert.equal(await queue.size(), 0);
+        assert.equal(await queue.inFlight(), 1);
+        assert.equal(await queue.done(), 0);
+
+        // wait a bit then ping it
+        await delay(1000);
+        assert.isOk(await queue.ping(msg.ack));
+        assert.equal(await queue.total(), 1);
+        assert.equal(await queue.size(), 0);
+        assert.equal(await queue.inFlight(), 1);
+        assert.equal(await queue.done(), 0);
+
+        // wait again, should still be in flight
+        await delay(1000);
+        assert.equal(await queue.total(), 1);
+        assert.equal(await queue.size(), 0);
+        assert.equal(await queue.inFlight(), 1);
+        assert.equal(await queue.done(), 0);
+
+        // Ack it so it's done
+        assert.isOk(await queue.ack(msg.ack));
+        assert.equal(await queue.total(), 1);
+        assert.equal(await queue.size(), 0);
+        assert.equal(await queue.inFlight(), 0);
+        assert.equal(await queue.done(), 1);
+
+        // And clear it so it's not even done any more
+        await queue.clean();
+        assert.equal(await queue.total(), 0);
+        assert.equal(await queue.size(), 0);
+        assert.equal(await queue.inFlight(), 0);
+        assert.equal(await queue.done(), 0);
+    });
+
+    after(async function () {
+        await client.close();
+    });
+
+});
 

@@ -1,107 +1,65 @@
-var async = require('async')
-var test = require('tape')
+const setup = require('./setup.js');
+const MongoDbQueue = require('../');
+const {assert} = require('chai');
+const delay = require('timeout-as-promise');
 
-var setup = require('./setup.js')
-var mongoDbQueue = require('../')
+describe('delay', function () {
+    let client, db;
 
-setup(function(db) {
+    before(async function () {
+        ({client, db} = await setup());
+    });
 
-    test('delay: check messages on this queue are returned after the delay', function(t) {
-        var queue = mongoDbQueue(db, 'delay', { delay : 3 })
+    it('checks if messages in a delayed queue are returned after the delay', async function () {
+        this.timeout(4000);
+        const queue = new MongoDbQueue(db, 'delay', {delay: 2});
+        let msg;
 
-        async.series(
-            [
-                function(next) {
-                    queue.add('Hello, World!', function(err, id) {
-                        t.ok(!err, 'There is no error when adding a message.')
-                        t.ok(id, 'There is an id returned when adding a message.')
-                        next()
-                    })
-                },
-                function(next) {
-                    // get something now and it shouldn't be there
-                    queue.get(function(err, msg) {
-                        t.ok(!err, 'No error when getting no messages')
-                        t.ok(!msg, 'No msg received')
-                        // now wait 4s
-                        setTimeout(next, 4 * 1000)
-                    })
-                },
-                function(next) {
-                    // get something now and it SHOULD be there
-                    queue.get(function(err, msg) {
-                        t.ok(!err, 'No error when getting a message')
-                        t.ok(msg.id, 'Got a message id now that the message delay has passed')
-                        queue.ack(msg.ack, next)
-                    })
-                },
-                function(next) {
-                    queue.get(function(err, msg) {
-                        // no more messages
-                        t.ok(!err, 'No error when getting no messages')
-                        t.ok(!msg, 'No more messages')
-                        next()
-                    })
-                },
-            ],
-            function(err) {
-                if (err) t.fail(err)
-                t.pass('Finished test ok')
-                t.end()
-            }
-        )
-    })
+        const origId = await queue.add('Hello, World!');
+        assert.isOk(origId);
 
-    test('delay: check an individual message delay overrides the queue delay', function(t) {
-        var queue = mongoDbQueue(db, 'delay')
+        // This message should not be there yet
+        msg = await queue.get();
+        assert.isNotOk(msg);
+        await delay(2500);
 
-        async.series(
-            [
-                function(next) {
-                  queue.add('I am delayed by 3 seconds', { delay : 3 }, function(err, id) {
-                        t.ok(!err, 'There is no error when adding a message.')
-                        t.ok(id, 'There is an id returned when adding a message.')
-                        next()
-                    })
-                },
-                function(next) {
-                    // get something now and it shouldn't be there
-                    queue.get(function(err, msg) {
-                        t.ok(!err, 'No error when getting no messages')
-                        t.ok(!msg, 'No msg received')
-                        // now wait 4s
-                        setTimeout(next, 4 * 1000)
-                    })
-                },
-                function(next) {
-                    // get something now and it SHOULD be there
-                    queue.get(function(err, msg) {
-                        t.ok(!err, 'No error when getting a message')
-                        t.ok(msg.id, 'Got a message id now that the message delay has passed')
-                        queue.ack(msg.ack, next)
-                    })
-                },
-                function(next) {
-                    queue.get(function(err, msg) {
-                        // no more messages
-                        t.ok(!err, 'No error when getting no messages')
-                        t.ok(!msg, 'No more messages')
-                        next()
-                    })
-                },
-            ],
-            function(err) {
-                if (err) t.fail(err)
-                t.pass('Finished test ok')
-                t.end()
-            }
-        )
-    })
+        // Now it should be there
+        msg = await queue.get();
+        assert.isOk(msg);
+        assert.equal(msg.id, origId);
+        await queue.ack(msg.ack);
 
-    test('db.close()', function(t) {
-        t.pass('db.close()')
-        db.close()
-        t.end()
-    })
+        // No more messages, but also no errors
+        msg = await queue.get();
+        assert.isNotOk(msg);
+    });
 
-})
+    it('checks if a per-message delay overrides the default delay', async function () {
+        this.timeout(4000);
+        const queue = new MongoDbQueue(db, 'delay');
+        let msg;
+
+        const origId = await queue.add('I am delayed by 2 seconds', { delay : 2 });
+        assert.isOk(origId);
+
+        // This message should not be there yet
+        msg = await queue.get();
+        assert.isNotOk(msg);
+        await delay(2500);
+
+        // Now it should be there
+        msg = await queue.get();
+        assert.isOk(msg);
+        assert.equal(msg.id, origId);
+        await queue.ack(msg.ack);
+
+        // No more messages, but also no errors
+        msg = await queue.get();
+        assert.isNotOk(msg);
+    });
+
+    after(async function () {
+        await client.close();
+    });
+
+});

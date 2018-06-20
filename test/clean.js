@@ -2,12 +2,12 @@ const setup = require('./setup.js');
 const MongoDbQueue = require('../');
 const {assert} = require('chai');
 
-describe('', function () {
+describe('clean', function () {
     let client, db, queue;
 
     before(async function () {
         ({client, db} = await setup());
-        queue = new MongoDbQueue(db, 'clean', {visibility: 3}); // TODO
+        queue = new MongoDbQueue(db, 'clean', {visibility: 3});
     });
 
     it('checks clean does not change an empty queue', async function () {

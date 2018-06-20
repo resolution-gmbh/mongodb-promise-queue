@@ -1,113 +1,40 @@
-var async = require('async')
-var test = require('tape')
+const setup = require('./setup.js');
+const MongoDbQueue = require('../');
+const {assert} = require('chai');
 
-var setup = require('./setup.js')
-var mongoDbQueue = require('../')
+describe('default', function () {
+    let client, db, queue;
 
-setup(function(db) {
-
-    test('first test', function(t) {
-        var queue = mongoDbQueue(db, 'default')
-        t.ok(queue, 'Queue created ok')
-        t.end()
+    before(async function () {
+        ({client, db} = await setup());
+        queue = new MongoDbQueue(db, 'default');
     });
 
-    test('single round trip', function(t) {
-        var queue = mongoDbQueue(db, 'default')
-        var msg
+    it('checks default functionality', async function () {
+        assert.isOk(await queue.add('Hello, World!'));
+        const msg = await queue.get();
+        assert.isString(msg.id);
+        assert.isString(msg.ack);
+        assert.isNumber(msg.tries);
+        assert.equal(msg.tries, 1);
+        assert.equal(msg.payload, 'Hello, World!');
 
-        async.series(
-            [
-                function(next) {
-                    queue.add('Hello, World!', function(err, id) {
-                        t.ok(!err, 'There is no error when adding a message.')
-                        t.ok(id, 'Received an id for this message')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.get(function(err, thisMsg) {
-                        console.log(thisMsg)
-                        msg = thisMsg
-                        t.ok(msg.id, 'Got a msg.id')
-                        t.equal(typeof msg.id, 'string', 'msg.id is a string')
-                        t.ok(msg.ack, 'Got a msg.ack')
-                        t.equal(typeof msg.ack, 'string', 'msg.ack is a string')
-                        t.ok(msg.tries, 'Got a msg.tries')
-                        t.equal(typeof msg.tries, 'number', 'msg.tries is a number')
-                        t.equal(msg.tries, 1, 'msg.tries is currently one')
-                        t.equal(msg.payload, 'Hello, World!', 'Payload is correct')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.ack(msg.ack, function(err, id) {
-                        t.ok(!err, 'No error when acking the message')
-                        t.ok(id, 'Received an id when acking this message')
-                        next()
-                    })
-                },
-            ],
-            function(err) {
-                t.ok(!err, 'No error during single round-trip test')
-                t.end()
+        assert.isOk(await queue.ack(msg.ack));
+
+        // Try to ack twice
+        try {
+            await queue.ack(msg.ack);
+            assert.fail('Message was successfully ACKed twice');
+        } catch (e) {
+            if (e.message === 'assert.fail()') {
+                throw e;
             }
-        )
-    })
+            // else ok
+        }
+    });
 
-    test("single round trip, can't be acked again", function(t) {
-        var queue = mongoDbQueue(db, 'default')
-        var msg
+    after(async function () {
+        await client.close();
+    });
 
-        async.series(
-            [
-                function(next) {
-                    queue.add('Hello, World!', function(err, id) {
-                        t.ok(!err, 'There is no error when adding a message.')
-                        t.ok(id, 'Received an id for this message')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.get(function(err, thisMsg) {
-                        msg = thisMsg
-                        t.ok(msg.id, 'Got a msg.id')
-                        t.equal(typeof msg.id, 'string', 'msg.id is a string')
-                        t.ok(msg.ack, 'Got a msg.ack')
-                        t.equal(typeof msg.ack, 'string', 'msg.ack is a string')
-                        t.ok(msg.tries, 'Got a msg.tries')
-                        t.equal(typeof msg.tries, 'number', 'msg.tries is a number')
-                        t.equal(msg.tries, 1, 'msg.tries is currently one')
-                        t.equal(msg.payload, 'Hello, World!', 'Payload is correct')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.ack(msg.ack, function(err, id) {
-                        t.ok(!err, 'No error when acking the message')
-                        t.ok(id, 'Received an id when acking this message')
-                        next()
-                    })
-                },
-                function(next) {
-                    queue.ack(msg.ack, function(err, id) {
-                        t.ok(err, 'There is an error when acking the message again')
-                        t.ok(!id, 'No id received when trying to ack an already deleted message')
-                        next()
-                    })
-                },
-            ],
-            function(err) {
-                t.ok(!err, 'No error during single round-trip when trying to double ack')
-                t.end()
-            }
-        )
-    })
-
-    test('db.close()', function(t) {
-        t.pass('db.close()')
-        db.close()
-        t.end()
-    })
-
-})
+});
