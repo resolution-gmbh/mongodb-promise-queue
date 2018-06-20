@@ -2,10 +2,13 @@
   "name": "mongodb-promise-queue",
   "version": "1.0.1",
   "description": "Message queues which uses MongoDB and promise, based on mongodb-queue.",
-  "main": "mongodb-promise-queue.js",
+  "main": "lib/index.js",
   "scripts": {
     "test": "mocha",
-    "coverage": "nyc --reporter=html --reporter=text mocha"
+    "lint": "eslint lib test",
+    "coverage": "nyc --reporter=html --reporter=text mocha",
+    "preversion": "npm test",
+    "postversion": "git push && git push --tags"
   },
   "dependencies": {},
   "devDependencies": {
@@ -16,6 +19,12 @@
     "mongodb": "^3.0.10",
     "nyc": "^12.0.2",
     "timeout-as-promise": "^1.0.0"
+  },
+  "peerDependencies": {
+    "mongodb": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=8"
   },
   "homepage": "https://github.com/omninnov/mongodb-promise-queue",
   "repository": {
@@ -36,6 +45,11 @@
       "name": "Andrew Chilton",
       "email": "andychilton@gmail.com",
       "url": "http://chilts.org/"
+    },
+    {
+      "name": "Tobias Theobald",
+      "email": "t.theobald@resolution.de",
+      "url": "https://resolution.de/"
     }
   ],
   "license": "MIT",

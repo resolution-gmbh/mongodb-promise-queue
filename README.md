@@ -7,6 +7,10 @@ using MongoDB.
 
 Based of the code of [mongodb-queue](https://github.com/chilts/mongodb-queue), a great project with nodejs callback, and not promise.
 
+### Requirements ###
+* Node.js version 8 or higher (heavily using async/await)
+* MonogDB Client Lib Version ^3.0.0 (the syntax for gaining db objects has changed in v3)
+
 ## Synopsis ##
 
 Create a connection to your MongoDB database, and use it to create a queue object:

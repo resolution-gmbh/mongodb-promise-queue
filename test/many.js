@@ -1,5 +1,5 @@
 const setup = require('./setup.js');
-const MongoDbQueue = require('../');
+const MongoDbQueue = require('..');
 const {assert} = require('chai');
 
 const TOTAL = 250;
