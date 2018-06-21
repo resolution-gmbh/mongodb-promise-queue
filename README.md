@@ -369,7 +369,13 @@ queue.get()
 ```
 
 This has the same effect as letting the message time out, except that the message is available for processing again
-immediately.
+immediately. Note that if you run .get() immediately after nack-ing a message, you'll likely immediately get it again
+unless another process snatched it up again in that short time.
+
+Therefore, if there are certain types of messages you can't handle, it's recommended to use separate queues instead of
+nack-ing messages that are not interesting to you.
+
+**Do** use it, for example, if, while processing the job, your program realizes it needs to shutdown.
 
 ### .total() ###
 
