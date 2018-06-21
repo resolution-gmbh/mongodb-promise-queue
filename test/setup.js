@@ -18,6 +18,7 @@ module.exports = async function () {
         'init',
         'indexes',
         'many',
+        'nack',
         'queue',
         'dead-queue',
         'queue-2',

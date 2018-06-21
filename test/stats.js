@@ -105,6 +105,21 @@ describe('stats', function () {
         assert.equal(await queue.inFlight(), 1);
         assert.equal(await queue.done(), 0);
 
+        // NACK it so it's available again
+        assert.isOk(await queue.nack(msg.ack));
+        assert.equal(await queue.total(), 1);
+        assert.equal(await queue.size(), 1);
+        assert.equal(await queue.inFlight(), 0);
+        assert.equal(await queue.done(), 0);
+
+        // Fetch it again
+        msg = await queue.get();
+        assert.isOk(msg.id);
+        assert.equal(await queue.total(), 1);
+        assert.equal(await queue.size(), 0);
+        assert.equal(await queue.inFlight(), 1);
+        assert.equal(await queue.done(), 0);
+
         // Ack it so it's done
         assert.isOk(await queue.ack(msg.ack));
         assert.equal(await queue.total(), 1);

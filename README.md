@@ -354,6 +354,23 @@ queue.get()
 })
 ```
 
+### .nack() ###
+
+After you have received an item from a queue and realized you can't process it, you can make it available again in the
+queue by calling `.nack()` with the unique `ackId` returned:
+
+```js
+queue.get()
+.then(message => {
+    return queue.nack(message.ack).then(id => {
+        // this message has now been put back in the queue
+    })
+})
+```
+
+This has the same effect as letting the message time out, except that the message is available for processing again
+immediately.
+
 ### .total() ###
 
 Returns the total number of messages that has ever been in the queue, including
