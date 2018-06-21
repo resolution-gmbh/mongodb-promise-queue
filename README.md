@@ -17,13 +17,13 @@ Create a connection to your MongoDB database, and use it to create a queue objec
 
 ```js
 const mongodb = require('mongodb')
-const mongoDbQueue = require('mongodb-promise-queue')
+const MongoDbQueue = require('mongodb-promise-queue')
 
 const con = 'mongodb://localhost:27017/test'
 
 mongodb.MongoClient.connect(con, function(err, client) {
     const db = client.db(null)
-    let queue = mongoDbQueue(db, 'my-queue')
+    let queue = new MongoDbQueue(db, 'my-queue')
 })
 ```
 
@@ -99,12 +99,12 @@ and a set of opts. The MongoDB collection used is the same name as the name
 passed in:
 
 ```
-let mongoDbQueue = require('mongodb-queue')
+const MongoDbQueue = require('mongodb-queue')
 
 // an instance of a queue
-let queue1 = mongoDbQueue(db, 'a-queue')
+const queue1 = new MongoDbQueue(db, 'a-queue')
 // another queue which uses the same collection as above
-let queue2 = mongoDbQueue(db, 'a-queue')
+const queue2 = new MongoDbQueue(db, 'a-queue')
 ```
 
 Using `queue1` and `queue2` here won't interfere with each other and will play along nicely, but that's not
@@ -116,7 +116,7 @@ it's not something you should do.
 To pass in options for the queue:
 
 ```
-let resizeQueue = mongoDbQueue(db, 'resize-queue', { visibility : 30, delay : 15 })
+const resizeQueue = new MongoDbQueue(db, 'resize-queue', { visibility : 30, delay : 15 })
 ```
 
 This example shows a queue with a message visibility of 30s and a delay to each message of 15s.
@@ -131,8 +131,8 @@ Each queue you create will be it's own collection.
 e.g.
 
 ```
-let resizeImageQueue = mongoDbQueue(db, 'resize-image-queue')
-let notifyOwnerQueue = mongoDbQueue(db, 'notify-owner-queue')
+const resizeImageQueue = new MongoDbQueue(db, 'resize-image-queue')
+const notifyOwnerQueue = new MongoDbQueue(db, 'notify-owner-queue')
 ```
 
 This will create two collections in MongoDB called `resize-image-queue` and `notify-owner-queue`.
@@ -149,7 +149,7 @@ You may set this visibility window on a per queue basis. For example, to set the
 visibility to 15 seconds:
 
 ```
-let queue = mongoDbQueue(db, 'queue', { visibility : 15 })
+const queue = new MongoDbQueue(db, 'queue', { visibility : 15 })
 ```
 
 All messages in this queue now have a visibility window of 15s, instead of the
@@ -167,7 +167,7 @@ retrieval 10s after being added.
 To delay all messages by 10 seconds, try this:
 
 ```
-let queue = mongoDbQueue(db, 'queue', { delay : 10 })
+const queue = new MongoDbQueue(db, 'queue', { delay : 10 })
 ```
 
 This is now the default for every message added to the queue.
@@ -182,8 +182,8 @@ automatically see problem messages.
 Pass in a queue (that you created) onto which these messages will be pushed:
 
 ```js
-let deadQueue = mongoDbQueue(db, 'dead-queue')
-let queue = mongoDbQueue(db, 'queue', { deadQueue : deadQueue })
+const deadQueue = new MongoDbQueue(db, 'dead-queue')
+const queue = new MongoDbQueue(db, 'queue', { deadQueue : deadQueue })
 ```
 
 If you pop a message off the `queue` over `maxRetries` times and have still not acked it,
