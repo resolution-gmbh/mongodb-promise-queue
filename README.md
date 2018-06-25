@@ -159,7 +159,7 @@ default 30s.
 
 Default: `0`
 
-When a message is added to a queue, it is immediately available for retrieval.
+When a message is added to a queue or nacked, it is immediately available for retrieval.
 However, there are times when you might like to delay messages coming off a queue.
 ie. if you set delay to be `10`, then every message will only be available for
 retrieval 10s after being added.
@@ -369,13 +369,28 @@ queue.get()
 ```
 
 This has the same effect as letting the message time out, except that the message is available for processing again
-immediately. Note that if you run .get() immediately after nack-ing a message, you'll likely immediately get it again
-unless another process snatched it up again in that short time.
+immediately unless a delay is defined on this message or the queue. Note that if you run .get() immediately after
+nack-ing a message, you'll likely immediately get it again unless another process snatched it up again in that short
+time.
 
 Therefore, if there are certain types of messages you can't handle, it's recommended to use separate queues instead of
 nack-ing messages that are not interesting to you.
 
 **Do** use it, for example, if, while processing the job, your program realizes it needs to shutdown.
+
+An alternative is to define a delay after which the message will be available again:
+
+```js
+queue.get()
+.then(message => {
+    return queue.nack(message.ack, { delay: 5 }).then(id => {
+        // this message has now been put back in the queue, but will only be retrievable after 5 seconds.
+    })
+})
+```
+
+Then you don't have to worry about getting the message back too soon, but this will also delay processing of the
+message.
 
 ### .total() ###
 
